@@ -17,6 +17,7 @@ val transformerFile = file("src/main/resources/accesstransformer.cfg")
 // Toolchains:
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(8))
+    toolchain.vendor.set(JvmVendorSpec.ADOPTIUM)
 }
 // Minecraft configuration:
 loom {
@@ -152,4 +153,3 @@ tasks.shadowJar {
     fun relocate(name: String) = relocate(name, "$baseGroup.deps.$name")
 }
 tasks.assemble.get().dependsOn(tasks.remapJar)
-

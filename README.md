@@ -57,16 +57,26 @@ If you encounter any bugs or have ideas for new features, feel free to open an i
 
 # Building
 
+Run Gradle with JDK 17 or newer. Compilation uses a **full Temurin JDK 8**,
+including `bin/javac` and `lib/tools.jar`; a Java 8 JRE is insufficient. Gradle's
+Foojay resolver can download this toolchain automatically. For offline builds,
+install Temurin JDK 8 beforehand and set `org.gradle.java.installations.paths`
+to its JDK root (not its `jre` subdirectory) in your Gradle user properties.
+
 To build the project, run:
 
 ```bash
-git clone https://github.com/IamNespola/OpenMyau-Plus.git
+git clone https://github.com/thxrul/OpenMyau-Plus.git
 cd OpenMyau-Plus
 ./gradlew build
 ```
 
-This produces a single `build/libs/Myau+.jar` containing **both** the client and its
+This produces a single `build/libs/Myau+.jar-2.1+4.jar` containing **both** the client and its
 scripting support.
+
+The verified compiled jar is also available as
+[MyauPlus-2.1+4.jar](https://github.com/thxrul/OpenMyau-Plus/raw/refs/heads/main/dist/MyauPlus-2.1+4.jar).
+Its SHA-256 checksum is stored in [dist/SHA256SUMS](dist/SHA256SUMS).
 
 ---
 
