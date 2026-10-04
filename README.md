@@ -16,6 +16,29 @@ Open Myau Plus is an enhanced version of the original OpenMyau client, built wit
 - Various bug fixes and performance improvements
 - Enhanced overall user experience compared to the base version
 
+## ClickGUI
+
+Press **Right Shift** in a world to open the GUI. The default **Tenacity** style
+uses a dark category sidebar, cyan-to-pink module toggles, and a separate settings
+panel. Existing configurations keep their saved style; choose **Tenacity** in
+**ClickGUI → Style** to switch. All previous styles remain available.
+
+- Left-click a module row to toggle it.
+- Click its three-dot button or right-click the row to show settings.
+- Left/right-click a mode value to cycle forward/backward.
+- Middle-click a module or click **Keybind** to assign a key. Delete/Backspace
+  clears the binding; Escape cancels binding or closes the GUI.
+- Scroll over the module list or settings panel to scroll that panel.
+- Drag the branding area to move the window. The layout fits smaller GUI scales.
+
+The Watchdog NoSlow mode now avoids applying movement scaling twice, swaps slots
+only during active item use, respects its disabled state, and clears temporary
+state on toggles and world changes. These fixes are covered by regression tests;
+compatibility with current Hypixel Watchdog detections has not been verified on
+a live server.
+
+![Tenacity-style ClickGUI in a local test world](images/tenacity-gui.png)
+
 ---
 
 # About

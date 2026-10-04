@@ -210,6 +210,7 @@ public class RiseClickGUI extends GuiScreen {
         Keyboard.enableRepeatEvents(false);
         dragging = false;
         Module gui = Myau.moduleManager.getModule("ClickGUI");
+        if (gui instanceof ClickGUIModule && ((ClickGUIModule) gui).isSwitchingGuiStyle()) return;
         if (gui != null) gui.setEnabled(false);
     }
 
