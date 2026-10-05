@@ -85,6 +85,13 @@ settings are restored before enabling the module. Shader resources now use the
 `myau:shaders/` asset namespace. CI builds and uploads the combined client and
 scripting JAR through one workflow.
 
+Rendering maintenance also keeps texture bindings in sync with Minecraft's state
+cache, uses supported texture unit 2 for blur/glow masks, and prevents zero-sized
+downsample framebuffers in small windows. Mixin discovery ignores directory and
+non-class entries. Blur/bloom shader passes were checked with software OpenGL at
+640×360; the Tenacity GUI was visually checked at 854×480 and 640×360 in an
+offline world. A one-time startup GL `1281` warning still needs investigation.
+
 ---
 
 # Scripting (Raven Script Loader)
