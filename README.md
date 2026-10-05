@@ -78,6 +78,13 @@ The verified compiled jar is also available as
 [MyauPlus-2.1+4.jar](https://github.com/thxrul/OpenMyau-Plus/raw/refs/heads/main/dist/MyauPlus-2.1+4.jar).
 Its SHA-256 checksum is stored in [dist/SHA256SUMS](dist/SHA256SUMS).
 
+The latest maintenance build fixes RGB color persistence (including legacy ARGB
+configs), closes config readers, and saves configs through a temporary file so
+write failures leave the existing config intact. Module key and visibility
+settings are restored before enabling the module. Shader resources now use the
+`myau:shaders/` asset namespace. CI builds and uploads the combined client and
+scripting JAR through one workflow.
+
 ---
 
 # Scripting (Raven Script Loader)

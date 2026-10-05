@@ -17,7 +17,7 @@ import static org.lwjgl.opengl.GL20.glUniform1;
 
 public class BloomUtil implements Utils {
 
-    public static ShaderUtil gaussianBloom = new ShaderUtil("assets/Shaders/bloom.frag");
+    public static ShaderUtil gaussianBloom = new ShaderUtil("myau:shaders/bloom.frag");
 
     public static Framebuffer framebuffer = new Framebuffer(1, 1, false);
 
