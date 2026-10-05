@@ -45,32 +45,32 @@ public class TenacityClickGuiTest {
 
     @Test
     public void scaledLeftClickTogglesTheSortedModule() throws Exception {
-        screen.click(103, 48, 0);
+        screen.click(103, 66, 0);
         verify(noSlow).toggle();
     }
 
     @Test
     public void optionsButtonSelectsWithoutToggling() throws Exception {
-        screen.click(231, 48, 0);
+        screen.click(231, 66, 0);
         assertSame(noSlow, get("selected"));
         verify(noSlow, never()).toggle();
     }
 
     @Test
     public void settingsPanelCyclesModesInBothDirections() throws Exception {
-        screen.click(103, 48, 1);
-        screen.click(270, 25, 0);
+        screen.click(103, 66, 1);
+        screen.click(270, 40, 0);
         assertEquals("Watchdog", mode.getModeString());
-        screen.click(270, 25, 1);
+        screen.click(270, 40, 1);
         assertEquals("Vanilla", mode.getModeString());
     }
 
     @Test
     public void middleClickStartsBindingAndEscapeCancelsIt() throws Exception {
-        screen.click(103, 48, 2);
+        screen.click(103, 66, 2);
         screen.key('k', Keyboard.KEY_K);
         verify(noSlow).setKey(Keyboard.KEY_K);
-        screen.click(103, 48, 2);
+        screen.click(103, 66, 2);
         screen.key('\0', Keyboard.KEY_ESCAPE);
         verify(noSlow, never()).setKey(0);
         assertNull(get("binding"));
@@ -78,14 +78,14 @@ public class TenacityClickGuiTest {
 
     @Test
     public void deleteClearsAKeybind() throws Exception {
-        screen.click(103, 48, 2);
+        screen.click(103, 66, 2);
         screen.key('\0', Keyboard.KEY_DELETE);
         verify(noSlow).setKey(0);
     }
 
     @Test
     public void categoryChangeClearsThePreviousSettings() throws Exception {
-        screen.click(103, 48, 1);
+        screen.click(103, 66, 1);
         screen.click(35, 52, 0); // Movement
         screen.click(35, 73, 0); // Render (empty in this fixture)
         assertEquals("Render", get("category"));
@@ -98,6 +98,34 @@ public class TenacityClickGuiTest {
         set("moduleScroll", 100f);
         screen.click(103, 1, 0);
         verify(noSlow, never()).toggle();
+    }
+
+    @Test
+    public void openingTransformKeepsClicksAlignedWithDisplayedRows() throws Exception {
+        screen.width = 640;
+        screen.height = 360;
+        set("visualScale", 0.96f);
+        screen.click(112, 71, 0);
+        verify(noSlow).toggle();
+    }
+
+    @Test
+    public void closingScreenDoesNotAcceptModuleClicks() throws Exception {
+        set("closing", true);
+        screen.click(103, 66, 0);
+        verify(noSlow, never()).toggle();
+    }
+
+    @Test
+    public void searchFiltersModulesAndSelectsMatchingSettings() throws Exception {
+        screen.click(180, 11, 0);
+        screen.key('n', Keyboard.KEY_N);
+        screen.key('o', Keyboard.KEY_O);
+        assertEquals(java.util.Collections.singletonList(noSlow), get("modules"));
+        assertSame(noSlow, get("selected"));
+        screen.key('\0', Keyboard.KEY_ESCAPE);
+        assertEquals(false, get("searching"));
+        assertEquals(false, get("closing"));
     }
 
     private Module module(String name) {

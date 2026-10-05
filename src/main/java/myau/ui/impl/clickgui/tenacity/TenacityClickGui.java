@@ -10,6 +10,10 @@ import myau.ui.impl.clickgui.rise.RiseClickGUI;
 import myau.ui.impl.clickgui.rise.RiseValueEditor;
 import myau.util.KeyBindUtil;
 import myau.util.RenderUtil;
+import myau.util.AnimationUtil;
+import myau.module.ModuleCatalog;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import myau.util.font.FontManager;
 import myau.util.font.impl.FontRenderer;
 import net.minecraft.client.gui.GuiScreen;
@@ -26,15 +30,13 @@ import java.util.List;
 
 /** Three-panel GUI inspired by the Tenacity reference, using the client's own modules. */
 public class TenacityClickGui extends GuiScreen {
-    private static final float WINDOW_W = 660, WINDOW_H = 340;
-    private static final float SIDEBAR_W = 134, SETTINGS_W = 174;
-    private static final float ROW_H = 46, ROW_STEP = 66;
+    private static final float WINDOW_W = 720, WINDOW_H = 400;
+    private static final float SIDEBAR_W = 134, SETTINGS_W = 220;
+    private static final float ROW_H = 52, ROW_STEP = 60;
     private static final int BACKGROUND = 0xFF202124, PANEL = 0xFF303136;
     private static final int MUTED = 0xFF888A92, WHITE = 0xFFF7F7FA;
     private static final int CYAN = 0xFF29B8DB, PINK = 0xFFE38FD5;
-    private static final String[] CATEGORIES = {
-            "Combat", "Movement", "Render", "Player", "Exploit", "Misc", "Scripts"
-    };
+    private static final String[] CATEGORIES = ModuleCatalog.CATEGORIES;
     private static TenacityClickGui instance;
 
     private final List<Module> modules = new ArrayList<>();
@@ -47,6 +49,13 @@ public class TenacityClickGui extends GuiScreen {
     private boolean dragging;
     private float dragX, dragY;
     private long lastFrame;
+    private float moduleTargetScroll, settingsTargetScroll;
+    private float openProgress = 1, visualScale = 1, categoryHighlight = 1;
+    private boolean closing;
+    private String searchText = "";
+    private boolean searching;
+    private final Map<Module, Float> toggleAnimations = new IdentityHashMap<>();
+    private final Map<Module, Float> hoverAnimations = new IdentityHashMap<>();
 
     public static TenacityClickGui getInstance() {
         if (instance == null) instance = new TenacityClickGui();
@@ -72,6 +81,8 @@ public class TenacityClickGui extends GuiScreen {
         } else {
             select(selected);
         }
+        openProgress = 0;
+        closing = false;
         lastFrame = System.nanoTime();
     }
 
@@ -82,14 +93,15 @@ public class TenacityClickGui extends GuiScreen {
     private void rebuildModules() {
         modules.clear();
         for (Module module : Myau.moduleManager.allModules()) {
-            String tab = RiseClickGUI.getModuleCategoryName(module);
-            // The reference groups inventory movement and scaffold with movement.
-            if (module instanceof InvWalk || "Scaffold".equals(module.getName())) tab = "Movement";
-            if ("Ghost".equals(tab)) tab = "Combat";
-            if (category.equals(tab)) modules.add(module);
+            String tab = ModuleCatalog.category(module);
+            String query = searchText.toLowerCase(java.util.Locale.ROOT);
+            if (query.isEmpty() ? category.equals(tab) :
+                    (module.getName() + " " + module.getDescription()).toLowerCase(java.util.Locale.ROOT).contains(query))
+                modules.add(module);
         }
         modules.sort(Comparator.comparing(Module::getName, String.CASE_INSENSITIVE_ORDER));
         moduleScroll = clamp(moduleScroll, 0, moduleScrollMax());
+        moduleTargetScroll = moduleScroll;
     }
 
     private void select(Module module) {
@@ -97,7 +109,7 @@ public class TenacityClickGui extends GuiScreen {
         editors.clear();
         selected = module;
         binding = null;
-        settingsScroll = 0;
+        settingsScroll = settingsTargetScroll = 0;
         List<Property<?>> properties = module == null ? null : Myau.propertyManager.properties.get(module);
         if (properties != null) for (Property<?> property : properties) {
             if (property instanceof ModeProperty) editors.add(new PillModeEditor((ModeProperty) property));
@@ -111,29 +123,41 @@ public class TenacityClickGui extends GuiScreen {
     }
 
     private void updateSettingsHeight() {
-        settingsHeight = 28;
+        settingsHeight = 32;
         for (RiseValueEditor editor : editors) if (editor.isVisible()) settingsHeight += editor.getHeight() + 6;
         settingsScroll = clamp(settingsScroll, 0, settingsScrollMax());
+        settingsTargetScroll = clamp(settingsTargetScroll, 0, settingsScrollMax());
     }
 
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
-        float mx = mouseX / scale, my = mouseY / scale;
+        float mx = localX(mouseX), my = localY(mouseY);
         if (dragging) {
             windowX = mx - dragX;
             windowY = my - dragY;
             clampWindow();
         }
-        float delta = Math.min(0.05f, (System.nanoTime() - lastFrame) / 1_000_000_000f);
+        float delta = Math.min(0.25f, (System.nanoTime() - lastFrame) / 1_000_000_000f);
         lastFrame = System.nanoTime();
+        openProgress = AnimationUtil.animateSmooth(closing ? 0 : 1, openProgress, 18, delta);
+        if (closing && openProgress < 0.02f) { mc.displayGuiScreen(null); return; }
+        visualScale = 0.96f + openProgress * 0.04f;
+        moduleScroll = AnimationUtil.animateSmooth(moduleTargetScroll, moduleScroll, 16, delta);
+        settingsScroll = AnimationUtil.animateSmooth(settingsTargetScroll, settingsScroll, 16, delta);
+        int categoryIndex = java.util.Arrays.asList(CATEGORIES).indexOf(category);
+        categoryHighlight = AnimationUtil.animateSmooth(categoryIndex, categoryHighlight, 16, delta);
         updateSettingsHeight();
+        net.minecraft.client.gui.Gui.drawRect(0, 0, width, height, ((int) (90 * openProgress) << 24) | 0x090C12);
         GlStateManager.pushMatrix();
+        GlStateManager.translate(width / 2f, height / 2f, 0);
+        GlStateManager.scale(visualScale, visualScale, 1);
+        GlStateManager.translate(-width / 2f, -height / 2f, 0);
         GlStateManager.scale(scale, scale, 1);
         try {
             rounded(windowX, windowY, WINDOW_W, WINDOW_H, 14, BACKGROUND);
             rounded(windowX, windowY, SIDEBAR_W, WINDOW_H, 14, PANEL);
             drawSidebar(mx, my);
-            drawModules(mx, my);
+            drawModules(mx, my, delta);
             drawSettings(mx, my, partialTicks, delta);
         } finally {
             GL11.glDisable(GL11.GL_SCISSOR_TEST);
@@ -151,6 +175,8 @@ public class TenacityClickGui extends GuiScreen {
         text(FontManager.productSans12, fit(FontManager.productSans12, Myau.version == null ? "dev" : Myau.version, 28),
                 windowX + 94, windowY + 20, MUTED);
         rounded(windowX + 14, windowY + 47, SIDEBAR_W - 28, 1, 0, 0xFF42444B);
+        rounded(windowX + 7, categoryY(0) + categoryHighlight * 38, SIDEBAR_W - 14, 30, 5, 0xFF373D49);
+        rounded(windowX + 7, categoryY(0) + categoryHighlight * 38 + 6, 2, 18, 1, CYAN);
         for (int i = 0; i < CATEGORIES.length; i++) {
             float y = categoryY(i);
             boolean active = category.equals(CATEGORIES[i]);
@@ -158,7 +184,7 @@ public class TenacityClickGui extends GuiScreen {
             int color = active ? WHITE : hover ? 0xFFBFC1C8 : MUTED;
             if (hover) rounded(windowX + 7, y, SIDEBAR_W - 14, 30, 5, 0xFF37383E);
             drawCategoryIcon(i, windowX + 21, y + 15, color);
-            text(FontManager.productSans28, CATEGORIES[i], windowX + 46, y + 7, color);
+            text(FontManager.productSans24, CATEGORIES[i], windowX + 46, y + 7, color);
         }
     }
 
@@ -195,39 +221,53 @@ public class TenacityClickGui extends GuiScreen {
         }
     }
 
-    private void drawModules(float mx, float my) {
-        clip(listX(), windowY + 6, listWidth(), WINDOW_H - 12);
+    private void drawModules(float mx, float my, float delta) {
+        text(FontManager.productSans24, category, listX() + 2, windowY + 14, WHITE);
+        rounded(listX() + listWidth() - 164, windowY + 10, 164, 24, 5, searching ? 0xFF394352 : PANEL);
+        String query = searchText.isEmpty() ? "Search modules..." : searchText + (searching ? "_" : "");
+        text(FontManager.productSans16, fit(FontManager.productSans16, query, 144),
+                listX() + listWidth() - 154, windowY + 17, searchText.isEmpty() ? MUTED : WHITE);
+        clip(listX(), listTop(), listWidth(), listViewport());
         for (int i = 0; i < modules.size(); i++) {
             Module module = modules.get(i);
             float y = rowY(i);
-            if (y + ROW_H < windowY + 6 || y > windowY + WINDOW_H - 6) continue;
-            boolean hover = over(mx, my, listX(), y, listWidth(), ROW_H);
-            rounded(listX(), y, listWidth(), ROW_H, 7, hover ? 0xFF37383F : PANEL);
-            if (module.isEnabled()) {
-                gradientToggle(listX(), y);
-                line(listX() + 15, y + 24, listX() + 21, y + 30, 4, WHITE);
-                line(listX() + 21, y + 30, listX() + 32, y + 18, 4, WHITE);
-            } else {
-                rounded(listX(), y, ROW_H, ROW_H, 7, 0xFF44474E);
-                rounded(listX() + 17, y + 17, 12, 12, 6, 0xFF30333A);
-            }
-            text(FontManager.productSans32, fit(FontManager.productSans32, module.getName(), listWidth() - 83),
-                    listX() + 56, y + 13, WHITE);
-            if (selected == module) rounded(listX() + listWidth() - 20, y, 20, ROW_H, 7, 0xFFC38FD0);
-            for (int dot = 0; dot < 3; dot++) rounded(listX() + listWidth() - 12.5f, y + 7 + dot * 13, 5, 5, 2.5f, WHITE);
+            boolean hover = over(mx, my, listX(), y, listWidth(), ROW_H) && over(mx, my, listX(), listTop(), listWidth(), listViewport());
+            float hovered = AnimationUtil.animateSmooth(hover ? 1 : 0, hoverAnimations.getOrDefault(module, 0f), 14, delta);
+            float enabled = AnimationUtil.animateSmooth(module.isEnabled() ? 1 : 0,
+                    toggleAnimations.getOrDefault(module, module.isEnabled() ? 1f : 0f), 16, delta);
+            hoverAnimations.put(module, hovered);
+            toggleAnimations.put(module, enabled);
+            if (y + ROW_H < listTop() || y > listTop() + listViewport()) continue;
+            rounded(listX(), y, listWidth(), ROW_H, 7,
+                    AnimationUtil.interpolateColor(PANEL, 0xFF3C414C, hovered));
+            if (selected == module) rounded(listX(), y + 9, 2, ROW_H - 18, 1, CYAN);
+            text(FontManager.productSans24, fit(FontManager.productSans24, module.getName(), listWidth() - 76),
+                    listX() + 12, y + 11, WHITE);
+            text(FontManager.productSans16, fit(FontManager.productSans16, module.getDescription(), listWidth() - 24),
+                    listX() + 12, y + 33, MUTED);
+            float switchX = listX() + listWidth() - 60;
+            rounded(switchX, y + 12, 28, 14, 7, AnimationUtil.interpolateColor(0xFF4A4F59, CYAN, enabled));
+            rounded(switchX + 2 + enabled * 14, y + 14, 10, 10, 5, WHITE);
+            for (int dot = 0; dot < 3; dot++) rounded(listX() + listWidth() - 16, y + 12 + dot * 5, 3, 3, 1.5f, MUTED);
         }
-        if (modules.isEmpty()) text(FontManager.productSans16, "No modules in this category", listX() + 10, windowY + 20, MUTED);
+        if (modules.isEmpty()) text(FontManager.productSans16, "No modules in this category", listX() + 10, listTop() + 12, MUTED);
         GL11.glDisable(GL11.GL_SCISSOR_TEST);
-        scrollbar(listX() + listWidth() + 3, windowY + 6, WINDOW_H - 12, moduleScroll, moduleScrollMax());
+        scrollbar(listX() + listWidth() + 3, listTop(), listViewport(), moduleScroll, moduleScrollMax());
     }
 
     private void drawSettings(float mx, float my, float partialTicks, float delta) {
         rounded(settingsX(), windowY, SETTINGS_W, WINDOW_H, 14, PANEL);
         String title = selected == null ? "Settings" : selected.getName();
-        title = fit(FontManager.productSans32, title, SETTINGS_W - 20);
-        text(FontManager.productSans32, title, settingsX() + (SETTINGS_W - textWidth(FontManager.productSans32, title)) / 2,
+        title = fit(FontManager.productSans24, title, SETTINGS_W - 24);
+        text(FontManager.productSans24, title, settingsX() + (SETTINGS_W - textWidth(FontManager.productSans24, title)) / 2,
                 windowY + 7, WHITE);
-        rounded(settingsX() + 1, windowY + 31, SETTINGS_W - 2, 1, 0, 0xFF292A2F);
+        if (selected != null) {
+            String description = selected.getDescription();
+            List<String> lines = wrap(description, SETTINGS_W - 24);
+            for (int i = 0; i < Math.min(2, lines.size()); i++)
+                text(FontManager.productSans16, lines.get(i), settingsX() + 12, windowY + 31 + i * 12, MUTED);
+        }
+        rounded(settingsX() + 12, windowY + 58, SETTINGS_W - 24, 1, 0, 0xFF424650);
         clip(settingsX() + 5, settingsTop(), SETTINGS_W - 10, settingsViewport());
         float y = settingsTop() + 4 - settingsScroll;
         for (RiseValueEditor editor : editors) {
@@ -247,16 +287,20 @@ public class TenacityClickGui extends GuiScreen {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int button) throws IOException {
-        float mx = mouseX / scale, my = mouseY / scale;
-        if (!over(mx, my, windowX, windowY, WINDOW_W, WINDOW_H)) return;
+        if (closing) return;
+        float mx = localX(mouseX), my = localY(mouseY);
+        if (!over(mx, my, windowX, windowY, WINDOW_W, WINDOW_H)) { searching = false; return; }
+        searching = button == 0 && over(mx, my, listX() + listWidth() - 164, windowY + 10, 164, 24);
+        if (searching) { releaseEditors(); return; }
         for (int i = 0; i < CATEGORIES.length; i++) if (button == 0 && over(mx, my, windowX + 8, categoryY(i), SIDEBAR_W - 16, 30)) {
             category = CATEGORIES[i];
-            moduleScroll = 0;
+            searchText = "";
+            moduleScroll = moduleTargetScroll = 0;
             rebuildModules();
             select(modules.isEmpty() ? null : modules.get(0));
             return;
         }
-        if (over(mx, my, listX(), windowY + 6, listWidth(), WINDOW_H - 12)) {
+        if (over(mx, my, listX(), listTop(), listWidth(), listViewport())) {
             for (int i = 0; i < modules.size(); i++) if (over(mx, my, listX(), rowY(i), listWidth(), ROW_H)) {
                 Module module = modules.get(i);
                 if (button == 2) { select(module); binding = module; }
@@ -286,12 +330,12 @@ public class TenacityClickGui extends GuiScreen {
         super.handleMouseInput();
         int wheel = Mouse.getEventDWheel();
         if (wheel == 0) return;
-        float mx = Mouse.getEventX() * width / (float) mc.displayWidth / scale;
-        float my = (height - Mouse.getEventY() * height / (float) mc.displayHeight - 1) / scale;
+        float mx = localX(Mouse.getEventX() * width / (float) mc.displayWidth);
+        float my = localY(height - Mouse.getEventY() * height / (float) mc.displayHeight - 1);
         float amount = wheel > 0 ? -28 : 28;
         releaseEditors();
-        if (over(mx, my, listX(), windowY + 6, listWidth(), WINDOW_H - 12)) moduleScroll = clamp(moduleScroll + amount, 0, moduleScrollMax());
-        else if (over(mx, my, settingsX(), settingsTop(), SETTINGS_W, settingsViewport())) settingsScroll = clamp(settingsScroll + amount, 0, settingsScrollMax());
+        if (over(mx, my, listX(), listTop(), listWidth(), listViewport())) moduleTargetScroll = clamp(moduleTargetScroll + amount, 0, moduleScrollMax());
+        else if (over(mx, my, settingsX(), settingsTop(), SETTINGS_W, settingsViewport())) settingsTargetScroll = clamp(settingsTargetScroll + amount, 0, settingsScrollMax());
     }
 
     @Override
@@ -302,6 +346,15 @@ public class TenacityClickGui extends GuiScreen {
 
     @Override
     protected void keyTyped(char typedChar, int keyCode) throws IOException {
+        if (searching) {
+            if (keyCode == Keyboard.KEY_ESCAPE || keyCode == Keyboard.KEY_RETURN) { searching = false; return; }
+            if (keyCode == Keyboard.KEY_BACK && !searchText.isEmpty()) searchText = searchText.substring(0, searchText.length() - 1);
+            else if (net.minecraft.util.ChatAllowedCharacters.isAllowedCharacter(typedChar) && searchText.length() < 64) searchText += typedChar;
+            moduleScroll = moduleTargetScroll = 0;
+            rebuildModules();
+            select(modules.isEmpty() ? null : modules.get(0));
+            return;
+        }
         if (binding != null) {
             if (keyCode != Keyboard.KEY_ESCAPE) binding.setKey(keyCode == Keyboard.KEY_DELETE || keyCode == Keyboard.KEY_BACK ? 0 : keyCode);
             binding = null;
@@ -311,11 +364,11 @@ public class TenacityClickGui extends GuiScreen {
             for (RiseValueEditor editor : editors) editor.key(typedChar, keyCode);
             return;
         }
-        if (keyCode == Keyboard.KEY_ESCAPE) mc.displayGuiScreen(null);
+        if (keyCode == Keyboard.KEY_ESCAPE) { closing = true; releaseEditors(); }
     }
 
     private boolean isTyping() {
-        if (binding != null) return true;
+        if (binding != null || searching) return true;
         for (RiseValueEditor editor : editors) if (editor.isTyping()) return true;
         return false;
     }
@@ -349,43 +402,40 @@ public class TenacityClickGui extends GuiScreen {
     private float listX() { return windowX + SIDEBAR_W + 12; }
     private float listWidth() { return WINDOW_W - SIDEBAR_W - SETTINGS_W - 30; }
     private float settingsX() { return windowX + WINDOW_W - SETTINGS_W; }
-    private float settingsTop() { return windowY + 36; }
-    private float settingsViewport() { return WINDOW_H - 44; }
+    private float settingsTop() { return windowY + 66; }
+    private float settingsViewport() { return WINDOW_H - 76; }
     private float categoryY(int index) { return windowY + 60 + index * 38; }
-    private float rowY(int index) { return windowY + 10 + index * ROW_STEP - moduleScroll; }
-    private float moduleScrollMax() { return Math.max(0, modules.size() * ROW_STEP - (ROW_STEP - ROW_H) + 8 - (WINDOW_H - 12)); }
+    private float rowY(int index) { return listTop() + index * ROW_STEP - moduleScroll; }
+    private float listTop() { return windowY + 46; }
+    private float listViewport() { return WINDOW_H - 58; }
+    private float moduleScrollMax() { return Math.max(0, modules.size() * ROW_STEP - (ROW_STEP - ROW_H) + 8 - listViewport()); }
     private float settingsScrollMax() { return Math.max(0, settingsHeight + 8 - settingsViewport()); }
     private void clampWindow() {
         windowX = clamp(windowX, 0, width / scale - WINDOW_W);
         windowY = clamp(windowY, 0, height / scale - WINDOW_H);
     }
-    private void clip(float x, float y, float w, float h) { RenderUtil.scissor(x * scale, y * scale, w * scale, h * scale); }
+    private float localX(float x) { return ((x - width / 2f) / visualScale + width / 2f) / scale; }
+    private float localY(float y) { return ((y - height / 2f) / visualScale + height / 2f) / scale; }
+    private void clip(float x, float y, float w, float h) {
+        RenderUtil.scissor(width / 2f + (x * scale - width / 2f) * visualScale,
+                height / 2f + (y * scale - height / 2f) * visualScale,
+                w * scale * visualScale, h * scale * visualScale);
+    }
+    private static List<String> wrap(String description, float width) {
+        List<String> lines = new ArrayList<>();
+        String current = "";
+        for (String word : description.split(" ")) {
+            String next = current.isEmpty() ? word : current + " " + word;
+            if (!current.isEmpty() && textWidth(FontManager.productSans16, next) > width) {
+                lines.add(current); current = word;
+            } else current = next;
+        }
+        if (!current.isEmpty()) lines.add(current);
+        return lines;
+    }
     private static float clamp(float value, float min, float max) { return Math.max(min, Math.min(value, Math.max(min, max))); }
     private static boolean over(float mx, float my, float x, float y, float w, float h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
     private static void rounded(float x, float y, float w, float h, float radius, int color) { RenderUtil.drawRoundedRect(x, y, w, h, radius, color, true, true, true, true); }
-    private static void gradientToggle(float x, float y) {
-        RenderUtil.enableRenderState();
-        GL11.glShadeModel(GL11.GL_SMOOTH);
-        GL11.glBegin(GL11.GL_POLYGON);
-        for (int corner = 0; corner < 4; corner++) {
-            float cx = x + (corner == 0 || corner == 3 ? 7 : ROW_H - 7);
-            float cy = y + (corner < 2 ? 7 : ROW_H - 7);
-            for (int angle = 180 + corner * 90; angle <= 270 + corner * 90; angle += 6) {
-                float vx = cx + (float) Math.cos(Math.toRadians(angle)) * 7;
-                float vy = cy + (float) Math.sin(Math.toRadians(angle)) * 7;
-                float t = ((vx - x) + (vy - y)) / (ROW_H * 2);
-                float r = (((CYAN >> 16) & 255) * (1 - t) + ((PINK >> 16) & 255) * t) / 255f;
-                float g = (((CYAN >> 8) & 255) * (1 - t) + ((PINK >> 8) & 255) * t) / 255f;
-                float b = ((CYAN & 255) * (1 - t) + (PINK & 255) * t) / 255f;
-                GL11.glColor4f(r, g, b, 1);
-                GL11.glVertex2f(vx, vy);
-            }
-        }
-        GL11.glEnd();
-        GL11.glShadeModel(GL11.GL_FLAT);
-        RenderUtil.disableRenderState();
-        GlStateManager.resetColor();
-    }
     private static void line(float x, float y, float x2, float y2, float width, int color) {
         GlStateManager.disableTexture2D();
         GlStateManager.enableBlend();

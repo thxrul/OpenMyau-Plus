@@ -19,17 +19,27 @@ Open Myau Plus is an enhanced version of the original OpenMyau client, built wit
 ## ClickGUI
 
 Press **Right Shift** in a world to open the GUI. The default **Tenacity** style
-uses a dark category sidebar, cyan-to-pink module toggles, and a separate settings
-panel. Existing configurations keep their saved style; choose **Tenacity** in
-**ClickGUI → Style** to switch. All previous styles remain available.
+has compact switches, animated hover and category selection, smooth scrolling,
+and opening/closing transitions. Module rows explain what each module does; the
+settings panel shows its description above the controls.
 
-- Left-click a module row to toggle it.
-- Click its three-dot button or right-click the row to show settings.
+- Click a module row to toggle it, or its three-dot button to show settings.
+- Search by module name or description. Escape leaves search; a second Escape closes the GUI.
 - Left/right-click a mode value to cycle forward/backward.
-- Middle-click a module or click **Keybind** to assign a key. Delete/Backspace
-  clears the binding; Escape cancels binding or closes the GUI.
+- Middle-click a module or click **Keybind** to assign a key. Delete/Backspace clears it.
 - Scroll over the module list or settings panel to scroll that panel.
-- Drag the branding area to move the window. The layout fits smaller GUI scales.
+- Drag the branding area to move the window. Layout and hitboxes adapt to GUI scale.
+
+All GUI styles share the same Combat, Movement, Render, Player, Network, Misc,
+and Scripts categories. Inventory movement belongs in Movement; chat, hotbar,
+and visual effects belong in Render; packet delay tools belong in Network.
+FastBow's obsolete packet-based charging and the duplicate WaterMark2 module
+have been removed. The existing WaterMark module remains available. The obsolete
+Log4j client-brand option was also removed.
+
+Chat uses Minecraft's bottom-left positioning, opacity, message fading, wrapping,
+scrolling, and clickable components, with rounded backgrounds. The input field
+uses the full screen width. Legacy custom chat offsets are no longer applied.
 
 The Watchdog NoSlow mode now avoids applying movement scaling twice, swaps slots
 only during active item use, respects its disabled state, and clears temporary
