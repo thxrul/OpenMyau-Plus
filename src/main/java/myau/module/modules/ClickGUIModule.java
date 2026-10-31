@@ -36,7 +36,7 @@ public class ClickGUIModule extends Module {
     };
 
     public ModeProperty accentColor = new ModeProperty("Color", 0, COLOR_NAMES);
-    public ModeProperty style = new ModeProperty("Style", 6, new String[]{"Normal", "Raven B3", "Raven B4", "Cheadle", "Modern", "Rise", "Tenacity"});
+    public ModeProperty style = new ModeProperty("Style", 0, new String[]{"Raven BS", "Normal", "Raven B3", "Raven B4", "Cheadle", "Modern", "Rise"});
     public BooleanProperty saveGuiState = new BooleanProperty("Save GUI State", true);
     public BooleanProperty shadow = new BooleanProperty("Shadow", true);
     public BooleanProperty glass = new BooleanProperty("Glass", true);
@@ -79,28 +79,31 @@ public class ClickGUIModule extends Module {
     }
 
     public GuiScreen getSelectedGui() {
+        if (style.getValue() == 0) {
+            return TenacityClickGui.getInstance();
+        }
         if (style.getValue() == 1) {
-            return ClickGui.getInstance();
+            return ClickGuiScreen.getInstance();
         }
         if (style.getValue() == 2) {
+            return ClickGui.getInstance();
+        }
+        if (style.getValue() == 3) {
             RavenClickGui raven = RavenClickGui.getInstance();
             return raven != null ? raven : new RavenClickGui();
         }
-        if (style.getValue() == 3) {
+        if (style.getValue() == 4) {
             CheadleClickGui cheadle = CheadleClickGui.getInstance();
             return cheadle != null ? cheadle : new CheadleClickGui();
         }
-        if (style.getValue() == 4) {
+        if (style.getValue() == 5) {
             myau.ui.impl.clickgui.modern.ModernClickGui modern = myau.ui.impl.clickgui.modern.ModernClickGui.getInstance();
             return modern != null ? modern : new myau.ui.impl.clickgui.modern.ModernClickGui();
         }
-        if (style.getValue() == 5) {
+        if (style.getValue() == 6) {
             return myau.ui.impl.clickgui.rise.RiseClickGUI.getInstance();
         }
-        if (style.getValue() == 6) {
-            return TenacityClickGui.getInstance();
-        }
-        return ClickGuiScreen.getInstance();
+        return TenacityClickGui.getInstance();
     }
 
     @Override

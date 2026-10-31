@@ -107,7 +107,7 @@ public class RavenClickGui extends GuiScreen {
 
     @Override
     public void drawScreen(int x, int y, float p) {
-        if (RenderFixes.shouldUseShaders()) {
+        if (RenderFixes.shouldUseShaders() && !myau.util.OptifineUtil.shouldBypassBlur()) {
             BlurUtils.prepareBlur();
             RoundedUtils.drawRound(0, 0, this.width, this.height, 0.0f, true, Color.black);
             float inputToRange = 1.5f;

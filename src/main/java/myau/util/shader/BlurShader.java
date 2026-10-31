@@ -109,9 +109,12 @@ public class BlurShader {
 
     public static void renderBlur(float radius, float x, float y, float w, float h, float effectiveScale) {
         if (radius <= 0) return;
+        if (myau.util.OptifineUtil.shouldBypassBlur()) return;
 
-        ensureFramebuffers();
-        ShaderUtil s = ensureShader();
+        GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
+        try {
+            ensureFramebuffers();
+            ShaderUtil s = ensureShader();
 
         ScaledResolution sr = new ScaledResolution(mc);
         float screenW = mc.displayWidth;
@@ -170,5 +173,8 @@ public class BlurShader {
 
         GlStateManager.bindTexture(0);
         GlStateManager.disableBlend();
+        } finally {
+            GL11.glPopAttrib();
+        }
     }
 }

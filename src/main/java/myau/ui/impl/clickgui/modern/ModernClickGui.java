@@ -101,7 +101,7 @@ public class ModernClickGui extends GuiScreen {
             boolean useGlass = clickGUI instanceof ClickGUIModule && ((ClickGUIModule) clickGUI).glass.getValue();
 
             // Pass 1: Blur Mask
-            if (useGlass) {
+            if (useGlass && !myau.util.OptifineUtil.shouldBypassBlur()) {
                 BlurUtils.prepareBlur();
                 for (Frame frame : frames) {
                     frame.renderBlurMask(scrollY);
