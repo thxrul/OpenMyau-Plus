@@ -8,6 +8,7 @@ public class BlurUtils {
     private static Framebuffer stencilFrameBufferBloom = new Framebuffer(1, 1, false);
 
     public static void prepareBlur() {
+        if (myau.util.OptifineUtil.shouldBypassBlur()) return;
         stencilFrameBufferBlur = RenderUtil.createFrameBuffer(stencilFrameBufferBlur);
         stencilFrameBufferBlur.framebufferClear();
         stencilFrameBufferBlur.bindFramebuffer(false);
@@ -20,6 +21,7 @@ public class BlurUtils {
     }
 
     public static void blurEnd(int passes, float radius) {
+        if (myau.util.OptifineUtil.shouldBypassBlur()) return;
         stencilFrameBufferBlur.unbindFramebuffer();
         KawaseBlur.renderBlur(stencilFrameBufferBlur.framebufferTexture, passes, radius);
     }

@@ -71,6 +71,8 @@ public class KawaseBlur {
     }
 
     public static void renderBlur(int stencilFrameBufferTexture, int iterations, float offset) {
+        if (myau.util.OptifineUtil.shouldBypassBlur()) return;
+
         // Initialize shaders on first use
         initShaders();
 

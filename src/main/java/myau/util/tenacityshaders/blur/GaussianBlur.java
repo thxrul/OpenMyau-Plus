@@ -35,9 +35,11 @@ public class GaussianBlur implements Utils {
     }
 
     public static void startBlur(){
+        if (myau.util.OptifineUtil.shouldBypassBlur()) return;
         StencilUtil.initStencilToWrite();
     }
     public static void endBlur(float radius, float compression) {
+        if (myau.util.OptifineUtil.shouldBypassBlur()) return;
         StencilUtil.readStencilBuffer(1);
 
         framebuffer = RenderUtil.createFrameBuffer(framebuffer);

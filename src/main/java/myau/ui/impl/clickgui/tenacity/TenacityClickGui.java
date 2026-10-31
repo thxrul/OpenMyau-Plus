@@ -1,21 +1,22 @@
 package myau.ui.impl.clickgui.tenacity;
 
 import myau.Myau;
+import myau.config.Config;
 import myau.module.Module;
+import myau.module.ModuleCatalog;
 import myau.module.modules.ClickGUIModule;
 import myau.module.modules.InvWalk;
 import myau.property.Property;
 import myau.property.properties.*;
-import myau.ui.impl.clickgui.rise.RiseClickGUI;
 import myau.ui.impl.clickgui.rise.RiseValueEditor;
-import myau.util.KeyBindUtil;
-import myau.util.RenderUtil;
 import myau.util.AnimationUtil;
-import myau.module.ModuleCatalog;
-import java.util.IdentityHashMap;
-import java.util.Map;
+import myau.util.KeyBindUtil;
+import myau.util.OptifineUtil;
+import myau.util.RenderUtil;
 import myau.util.font.FontManager;
 import myau.util.font.impl.FontRenderer;
+import myau.util.shader.BlurUtils;
+import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.settings.KeyBinding;
@@ -23,19 +24,26 @@ import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
 
+import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 
-/** Three-panel GUI inspired by the Tenacity reference, using the client's own modules. */
+/**
+ * Raven B-S Client UI matching reference design:
+ * - 11 vertical sidebar category tabs (Combat, Movement, Render, Player, World, Minemen, Bedwars, Duels, Skywars, Settings, Configs)
+ * - Module cards with name, description preview, and animated switches
+ * - Module settings panel with property editors and keybinding
+ * - Configs management view
+ * - Description on hover tooltip feature
+ * - OptiFine compatibility safe blur
+ */
 public class TenacityClickGui extends GuiScreen {
     private static final float WINDOW_W = 720, WINDOW_H = 400;
     private static final float SIDEBAR_W = 134, SETTINGS_W = 220;
     private static final float ROW_H = 52, ROW_STEP = 60;
     private static final int BACKGROUND = 0xFF202124, PANEL = 0xFF303136;
     private static final int MUTED = 0xFF888A92, WHITE = 0xFFF7F7FA;
-    private static final int CYAN = 0xFF29B8DB, PINK = 0xFFE38FD5;
+    private static final int CYAN = 0xFF29B8DB;
     private static final String[] CATEGORIES = ModuleCatalog.CATEGORIES;
     private static TenacityClickGui instance;
 
@@ -44,6 +52,7 @@ public class TenacityClickGui extends GuiScreen {
     private String category = "Movement";
     private Module selected;
     private Module binding;
+    private Module hoveredModule;
     private float windowX = -1, windowY = -1, scale = 1;
     private float moduleScroll, settingsScroll, settingsHeight;
     private boolean dragging;
@@ -54,6 +63,8 @@ public class TenacityClickGui extends GuiScreen {
     private boolean closing;
     private String searchText = "";
     private boolean searching;
+    private String newConfigName = "default";
+    private boolean typingConfig;
     private final Map<Module, Float> toggleAnimations = new IdentityHashMap<>();
     private final Map<Module, Float> hoverAnimations = new IdentityHashMap<>();
 
@@ -90,14 +101,26 @@ public class TenacityClickGui extends GuiScreen {
         return (ClickGUIModule) Myau.moduleManager.getModule("ClickGUI");
     }
 
+    private int getAccentRGB() {
+        ClickGUIModule gui = guiModule();
+        return gui != null ? gui.getAccentColor().getRGB() : CYAN;
+    }
+
     private void rebuildModules() {
         modules.clear();
+        if ("Configs".equalsIgnoreCase(category)) {
+            moduleScroll = moduleTargetScroll = 0;
+            return;
+        }
         for (Module module : Myau.moduleManager.allModules()) {
             String tab = ModuleCatalog.category(module);
-            String query = searchText.toLowerCase(java.util.Locale.ROOT);
-            if (query.isEmpty() ? category.equals(tab) :
-                    (module.getName() + " " + module.getDescription()).toLowerCase(java.util.Locale.ROOT).contains(query))
-                modules.add(module);
+            String query = searchText.toLowerCase(Locale.ROOT).trim();
+            if (query.isEmpty()) {
+                if (category.equalsIgnoreCase(tab)) modules.add(module);
+            } else {
+                String searchTarget = (module.getName() + " " + module.getDescription()).toLowerCase(Locale.ROOT);
+                if (searchTarget.contains(query)) modules.add(module);
+            }
         }
         modules.sort(Comparator.comparing(Module::getName, String.CASE_INSENSITIVE_ORDER));
         moduleScroll = clamp(moduleScroll, 0, moduleScrollMax());
@@ -132,130 +155,237 @@ public class TenacityClickGui extends GuiScreen {
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         float mx = localX(mouseX), my = localY(mouseY);
+        hoveredModule = null;
+
         if (dragging) {
             windowX = mx - dragX;
             windowY = my - dragY;
             clampWindow();
         }
+
         float delta = Math.min(0.25f, (System.nanoTime() - lastFrame) / 1_000_000_000f);
         lastFrame = System.nanoTime();
         openProgress = AnimationUtil.animateSmooth(closing ? 0 : 1, openProgress, 18, delta);
-        if (closing && openProgress < 0.02f) { mc.displayGuiScreen(null); return; }
+        if (closing && openProgress < 0.02f) {
+            mc.displayGuiScreen(null);
+            return;
+        }
+
         visualScale = 0.96f + openProgress * 0.04f;
         moduleScroll = AnimationUtil.animateSmooth(moduleTargetScroll, moduleScroll, 16, delta);
         settingsScroll = AnimationUtil.animateSmooth(settingsTargetScroll, settingsScroll, 16, delta);
-        int categoryIndex = java.util.Arrays.asList(CATEGORIES).indexOf(category);
+
+        int categoryIndex = 0;
+        for (int i = 0; i < CATEGORIES.length; i++) {
+            if (CATEGORIES[i].equalsIgnoreCase(category)) {
+                categoryIndex = i;
+                break;
+            }
+        }
         categoryHighlight = AnimationUtil.animateSmooth(categoryIndex, categoryHighlight, 16, delta);
         updateSettingsHeight();
-        net.minecraft.client.gui.Gui.drawRect(0, 0, width, height, ((int) (90 * openProgress) << 24) | 0x090C12);
+
+        // Background: OptiFine compatibility safe blur vs dark overlay
+        ClickGUIModule gui = guiModule();
+        boolean useGlass = gui != null && gui.glass.getValue();
+        if (useGlass && !OptifineUtil.shouldBypassBlur()) {
+            boolean blurPrepared = false;
+            try {
+                BlurUtils.prepareBlur();
+                blurPrepared = true;
+                rounded(windowX, windowY, WINDOW_W, WINDOW_H, 14, 0xFFFFFFFF);
+                BlurUtils.blurEnd(2, 2.5f);
+            } catch (Throwable t) {
+                if (blurPrepared) {
+                    try {
+                        mc.getFramebuffer().bindFramebuffer(false);
+                    } catch (Throwable ignored) {}
+                }
+                Gui.drawRect(0, 0, width, height, ((int) (90 * openProgress) << 24) | 0x090C12);
+            }
+        } else {
+            Gui.drawRect(0, 0, width, height, ((int) (90 * openProgress) << 24) | 0x090C12);
+        }
+
         GlStateManager.pushMatrix();
         GlStateManager.translate(width / 2f, height / 2f, 0);
         GlStateManager.scale(visualScale, visualScale, 1);
         GlStateManager.translate(-width / 2f, -height / 2f, 0);
         GlStateManager.scale(scale, scale, 1);
+
         try {
+            // Main Window Container
             rounded(windowX, windowY, WINDOW_W, WINDOW_H, 14, BACKGROUND);
             rounded(windowX, windowY, SIDEBAR_W, WINDOW_H, 14, PANEL);
             drawSidebar(mx, my);
-            drawModules(mx, my, delta);
-            drawSettings(mx, my, partialTicks, delta);
+
+            if ("Configs".equalsIgnoreCase(category)) {
+                drawConfigs(mx, my);
+            } else {
+                drawModules(mx, my, delta);
+                drawSettings(mx, my, partialTicks, delta);
+            }
+
+            // Description on Hover Tooltip (rendered on top of all panels)
+            drawHoverTooltip(mx, my);
+
         } finally {
             GL11.glDisable(GL11.GL_SCISSOR_TEST);
             GlStateManager.color(1, 1, 1, 1);
             GlStateManager.popMatrix();
         }
+
         updateMovement();
     }
 
     private void drawSidebar(float mx, float my) {
+        int accent = getAccentRGB();
+
+        // Header / Logo
         rounded(windowX + 9, windowY + 10, 26, 26, 13, WHITE);
         rounded(windowX + 12, windowY + 13, 20, 20, 10, PANEL);
-        text(FontManager.productSans24, "M", windowX + 16, windowY + 13, WHITE);
-        text(FontManager.productSans24, "Myau+", windowX + 43, windowY + 15, WHITE);
+        text(FontManager.productSans24, "R", windowX + 17, windowY + 13, accent);
+        text(FontManager.productSans24, "Raven B-S", windowX + 43, windowY + 15, WHITE);
         text(FontManager.productSans12, fit(FontManager.productSans12, Myau.version == null ? "dev" : Myau.version, 28),
-                windowX + 94, windowY + 20, MUTED);
+                windowX + 102, windowY + 20, MUTED);
+
         rounded(windowX + 14, windowY + 47, SIDEBAR_W - 28, 1, 0, 0xFF42444B);
+
+        // Highlight pill on selected category
         rounded(windowX + 7, categoryY(0) + categoryHighlight * 38, SIDEBAR_W - 14, 30, 5, 0xFF373D49);
-        rounded(windowX + 7, categoryY(0) + categoryHighlight * 38 + 6, 2, 18, 1, CYAN);
+        rounded(windowX + 7, categoryY(0) + categoryHighlight * 38 + 6, 2, 18, 1, accent);
+
         for (int i = 0; i < CATEGORIES.length; i++) {
             float y = categoryY(i);
-            boolean active = category.equals(CATEGORIES[i]);
+            boolean active = category.equalsIgnoreCase(CATEGORIES[i]);
             boolean hover = over(mx, my, windowX + 8, y, SIDEBAR_W - 16, 30);
             int color = active ? WHITE : hover ? 0xFFBFC1C8 : MUTED;
             if (hover) rounded(windowX + 7, y, SIDEBAR_W - 14, 30, 5, 0xFF37383E);
-            drawCategoryIcon(i, windowX + 21, y + 15, color);
-            text(FontManager.productSans24, CATEGORIES[i], windowX + 46, y + 7, color);
+            drawCategoryIcon(i, windowX + 21, y + 15, active ? accent : color);
+            text(FontManager.productSans16, CATEGORIES[i], windowX + 38, y + 8, color);
         }
     }
 
     private void drawCategoryIcon(int icon, float x, float y, int color) {
-        if (icon == 5) {
-            for (int i = -1; i <= 1; i++) {
-                rounded(x - 9, y + i * 5 - 1, 3, 2, 1, color);
-                rounded(x - 3, y + i * 5 - 1, 13, 2, 1, color);
-            }
-        } else if (icon == 2) {
-            RenderUtil.drawRoundedRectOutline(x - 10, y - 6, 20, 12, 6, 1.5f, color, true, true, true, true);
-            rounded(x - 3, y - 3, 6, 6, 3, color);
-        } else if (icon == 1 || icon == 3) {
-            rounded(x - 2, y - 12, 6, 6, 3, color);
-            line(x, y - 4, x - 3, y + 3, 3, color);
-            line(x - 3, y + 3, x - 7, y + 10, 3, color);
-            line(x - 3, y + 3, x + 6, y + 10, 3, color);
-            line(x - 1, y - 2, x + 7, y + (icon == 1 ? -4 : 3), 3, color);
-            line(x - 1, y - 2, x - 8, y + 1, 3, color);
-        } else if (icon == 6) {
-            RenderUtil.drawRoundedRectOutline(x - 8, y - 11, 16, 22, 2, 1.5f, color, true, true, true, true);
-            line(x - 3, y - 4, x - 6, y, 1.5f, color);
-            line(x - 6, y, x - 3, y + 4, 1.5f, color);
-            line(x + 3, y - 4, x + 6, y, 1.5f, color);
-            line(x + 6, y, x + 3, y + 4, 1.5f, color);
-        } else if (icon == 4) {
-            rounded(x - 5, y - 8, 10, 17, 5, color);
-            for (int i = -1; i <= 1; i++) line(x - 10, y + i * 6, x + 10, y + i * 6, 1.5f, color);
-        } else {
-            line(x - 8, y - 9, x + 8, y + 9, 3, color);
-            line(x + 8, y - 9, x - 8, y + 9, 3, color);
-            line(x - 10, y + 4, x - 4, y + 10, 2, color);
-            line(x + 4, y + 10, x + 10, y + 4, 2, color);
+        switch (icon) {
+            case 0: // Combat
+                line(x - 6, y + 6, x + 6, y - 6, 2f, color);
+                line(x - 3, y + 6, x - 6, y + 3, 2f, color);
+                line(x - 2, y + 2, x + 2, y - 2, 3f, color);
+                break;
+            case 1: // Movement
+                rounded(x - 2, y - 12, 6, 6, 3, color);
+                line(x, y - 4, x - 3, y + 3, 3, color);
+                line(x - 3, y + 3, x - 7, y + 10, 3, color);
+                line(x - 3, y + 3, x + 6, y + 10, 3, color);
+                line(x - 1, y - 2, x + 7, y - 4, 3, color);
+                line(x - 1, y - 2, x - 8, y + 1, 3, color);
+                break;
+            case 2: // Render
+                RenderUtil.drawRoundedRectOutline(x - 10, y - 6, 20, 12, 6, 1.5f, color, true, true, true, true);
+                rounded(x - 3, y - 3, 6, 6, 3, color);
+                break;
+            case 3: // Player
+                rounded(x - 2, y - 12, 6, 6, 3, color);
+                line(x, y - 4, x - 3, y + 3, 3, color);
+                line(x - 3, y + 3, x - 7, y + 10, 3, color);
+                line(x - 3, y + 3, x + 6, y + 10, 3, color);
+                line(x - 1, y - 2, x + 7, y + 3, 3, color);
+                line(x - 1, y - 2, x - 8, y + 1, 3, color);
+                break;
+            case 4: // World
+                rounded(x - 5, y - 8, 10, 17, 5, color);
+                for (int i = -1; i <= 1; i++) line(x - 10, y + i * 6, x + 10, y + i * 6, 1.5f, color);
+                break;
+            case 5: // Minemen
+                for (int i = -1; i <= 1; i++) {
+                    rounded(x - 9, y + i * 5 - 1, 3, 2, 1, color);
+                    rounded(x - 3, y + i * 5 - 1, 13, 2, 1, color);
+                }
+                break;
+            case 6: // Bedwars
+                rounded(x - 7, y - 1, 14, 4, 1, color);
+                rounded(x - 7, y - 4, 3, 7, 1, color);
+                rounded(x + 4, y - 2, 3, 5, 1, color);
+                break;
+            case 7: // Duels
+                line(x - 6, y - 6, x + 6, y + 6, 2f, color);
+                line(x + 6, y - 6, x - 6, y + 6, 2f, color);
+                break;
+            case 8: // Skywars
+                rounded(x - 6, y - 1, 12, 5, 2.5f, color);
+                rounded(x - 3, y - 4, 6, 5, 2.5f, color);
+                break;
+            case 9: // Settings
+                RenderUtil.drawRoundedRectOutline(x - 8, y - 11, 16, 22, 2, 1.5f, color, true, true, true, true);
+                line(x - 3, y - 4, x - 6, y, 1.5f, color);
+                line(x - 6, y, x - 3, y + 4, 1.5f, color);
+                line(x + 3, y - 4, x + 6, y, 1.5f, color);
+                line(x + 6, y, x + 3, y + 4, 1.5f, color);
+                break;
+            case 10: // Configs
+            default:
+                RenderUtil.drawRoundedRectOutline(x - 6, y - 6, 12, 12, 2, 1.5f, color, true, true, true, true);
+                line(x - 3, y - 2, x + 3, y - 2, 1.5f, color);
+                line(x - 3, y + 1, x + 3, y + 1, 1.5f, color);
+                break;
         }
     }
 
     private void drawModules(float mx, float my, float delta) {
+        int accent = getAccentRGB();
+
+        // Top Category Title
         text(FontManager.productSans24, category, listX() + 2, windowY + 14, WHITE);
+
+        // Search Bar
         rounded(listX() + listWidth() - 164, windowY + 10, 164, 24, 5, searching ? 0xFF394352 : PANEL);
         String query = searchText.isEmpty() ? "Search modules..." : searchText + (searching ? "_" : "");
         text(FontManager.productSans16, fit(FontManager.productSans16, query, 144),
                 listX() + listWidth() - 154, windowY + 17, searchText.isEmpty() ? MUTED : WHITE);
+
         clip(listX(), listTop(), listWidth(), listViewport());
         for (int i = 0; i < modules.size(); i++) {
             Module module = modules.get(i);
             float y = rowY(i);
             boolean hover = over(mx, my, listX(), y, listWidth(), ROW_H) && over(mx, my, listX(), listTop(), listWidth(), listViewport());
+
+            if (hover) {
+                hoveredModule = module;
+            }
+
             float hovered = AnimationUtil.animateSmooth(hover ? 1 : 0, hoverAnimations.getOrDefault(module, 0f), 14, delta);
             float enabled = AnimationUtil.animateSmooth(module.isEnabled() ? 1 : 0,
                     toggleAnimations.getOrDefault(module, module.isEnabled() ? 1f : 0f), 16, delta);
             hoverAnimations.put(module, hovered);
             toggleAnimations.put(module, enabled);
+
             if (y + ROW_H < listTop() || y > listTop() + listViewport()) continue;
+
             rounded(listX(), y, listWidth(), ROW_H, 7,
                     AnimationUtil.interpolateColor(PANEL, 0xFF3C414C, hovered));
-            if (selected == module) rounded(listX(), y + 9, 2, ROW_H - 18, 1, CYAN);
+
+            if (selected == module) rounded(listX(), y + 9, 2, ROW_H - 18, 1, accent);
+
             text(FontManager.productSans24, fit(FontManager.productSans24, module.getName(), listWidth() - 76),
                     listX() + 12, y + 11, WHITE);
             text(FontManager.productSans16, fit(FontManager.productSans16, module.getDescription(), listWidth() - 24),
                     listX() + 12, y + 33, MUTED);
+
             float switchX = listX() + listWidth() - 60;
-            rounded(switchX, y + 12, 28, 14, 7, AnimationUtil.interpolateColor(0xFF4A4F59, CYAN, enabled));
+            rounded(switchX, y + 12, 28, 14, 7, AnimationUtil.interpolateColor(0xFF4A4F59, accent, enabled));
             rounded(switchX + 2 + enabled * 14, y + 14, 10, 10, 5, WHITE);
+
             for (int dot = 0; dot < 3; dot++) rounded(listX() + listWidth() - 16, y + 12 + dot * 5, 3, 3, 1.5f, MUTED);
         }
+
         if (modules.isEmpty()) text(FontManager.productSans16, "No modules in this category", listX() + 10, listTop() + 12, MUTED);
         GL11.glDisable(GL11.GL_SCISSOR_TEST);
         scrollbar(listX() + listWidth() + 3, listTop(), listViewport(), moduleScroll, moduleScrollMax());
     }
 
     private void drawSettings(float mx, float my, float partialTicks, float delta) {
+        int accent = getAccentRGB();
         rounded(settingsX(), windowY, SETTINGS_W, WINDOW_H, 14, PANEL);
         String title = selected == null ? "Settings" : selected.getName();
         title = fit(FontManager.productSans24, title, SETTINGS_W - 24);
@@ -272,26 +402,124 @@ public class TenacityClickGui extends GuiScreen {
         float y = settingsTop() + 4 - settingsScroll;
         for (RiseValueEditor editor : editors) {
             if (!editor.isVisible()) continue;
-            // Keep active drag updates even when an editor scrolls out of view.
             editor.draw(settingsX() + 10, y, SETTINGS_W - 20, (int) mx, (int) my, partialTicks, delta, 255);
             y += editor.getHeight() + 6;
         }
         if (selected != null) {
             text(FontManager.productSans16, "Keybind", settingsX() + 10, y + 5, WHITE);
             String key = binding == selected ? "Press a key..." : selected.getKey() == 0 ? "None" : KeyBindUtil.getKeyName(selected.getKey());
-            text(FontManager.productSans12, key, settingsX() + SETTINGS_W - 10 - textWidth(FontManager.productSans12, key), y + 7, MUTED);
+            text(FontManager.productSans12, key, settingsX() + SETTINGS_W - 10 - textWidth(FontManager.productSans12, key), y + 7, binding == selected ? accent : MUTED);
         }
         GL11.glDisable(GL11.GL_SCISSOR_TEST);
         scrollbar(settingsX() + SETTINGS_W - 4, settingsTop(), settingsViewport(), settingsScroll, settingsScrollMax());
+    }
+
+    private void drawConfigs(float mx, float my) {
+        int accent = getAccentRGB();
+        float contentW = WINDOW_W - SIDEBAR_W - 30;
+
+        text(FontManager.productSans24, "Configurations", listX() + 4, windowY + 14, WHITE);
+        text(FontManager.productSans16, "Manage profiles and client configurations", listX() + 4, windowY + 38, MUTED);
+
+        float cardY = windowY + 68;
+        rounded(listX(), cardY, contentW, 64, 8, 0xFF282A30);
+        text(FontManager.productSans20, "Active Profile", listX() + 14, cardY + 10, WHITE);
+
+        float inputW = 160, inputH = 22;
+        float inputX = listX() + 14, inputY = cardY + 32;
+        rounded(inputX, inputY, inputW, inputH, 5, typingConfig ? 0xFF363B48 : 0xFF24262C);
+        String nameStr = newConfigName + (typingConfig ? "_" : "");
+        text(FontManager.productSans16, fit(FontManager.productSans16, nameStr, inputW - 14), inputX + 8, inputY + 4, WHITE);
+
+        float btnW = 70, btnH = 22;
+        float saveBtnX = inputX + inputW + 10;
+        boolean saveHover = over(mx, my, saveBtnX, inputY, btnW, btnH);
+        rounded(saveBtnX, inputY, btnW, btnH, 5, saveHover ? accent : 0xFF353945);
+        text(FontManager.productSans16, "Save", saveBtnX + (btnW - textWidth(FontManager.productSans16, "Save")) / 2, inputY + 4, WHITE);
+
+        float loadBtnX = saveBtnX + btnW + 8;
+        boolean loadHover = over(mx, my, loadBtnX, inputY, btnW, btnH);
+        rounded(loadBtnX, inputY, btnW, btnH, 5, loadHover ? accent : 0xFF353945);
+        text(FontManager.productSans16, "Load", loadBtnX + (btnW - textWidth(FontManager.productSans16, "Load")) / 2, inputY + 4, WHITE);
+
+        float listAreaY = cardY + 76;
+        text(FontManager.productSans20, "Saved Profiles", listX() + 4, listAreaY, WHITE);
+
+        File dir = new File(mc.mcDataDir, "myau/configs");
+        String[] files = dir.exists() ? dir.list((d, n) -> n.endsWith(".json")) : new String[0];
+        if (files == null || files.length == 0) files = new String[]{"default.json"};
+
+        float rowTop = listAreaY + 20;
+        for (int i = 0; i < Math.min(5, files.length); i++) {
+            String filename = files[i];
+            String configName = filename.endsWith(".json") ? filename.substring(0, filename.length() - 5) : filename;
+            float rowY = rowTop + i * 34;
+            boolean hover = over(mx, my, listX(), rowY, contentW, 28);
+            rounded(listX(), rowY, contentW, 28, 6, hover ? 0xFF353842 : 0xFF282A30);
+            text(FontManager.productSans16, configName, listX() + 14, rowY + 7, WHITE);
+
+            float applyW = 50, applyH = 18;
+            float applyX = listX() + contentW - applyW - 6;
+            float applyY = rowY + 5;
+            boolean applyHover = over(mx, my, applyX, applyY, applyW, applyH);
+            rounded(applyX, applyY, applyW, applyH, 4, applyHover ? accent : 0xFF353945);
+            text(FontManager.productSans12, "Apply", applyX + (applyW - textWidth(FontManager.productSans12, "Apply")) / 2, applyY + 4, WHITE);
+        }
+    }
+
+    /**
+     * Description on hover feature:
+     * Renders a tooltip box near the mouse cursor showing the module's description,
+     * status, and keybind information.
+     */
+    private void drawHoverTooltip(float mx, float my) {
+        if (hoveredModule == null || dragging || searching || typingConfig) return;
+
+        int accent = getAccentRGB();
+        String name = hoveredModule.getName();
+        String desc = hoveredModule.getDescription();
+        String status = hoveredModule.isEnabled() ? "Enabled" : "Disabled";
+        int statusColor = hoveredModule.isEnabled() ? 0xFF55FF55 : 0xFFFF5555;
+
+        float tipW = 200;
+        List<String> descLines = wrap(desc, tipW - 16);
+        float lineH = 12;
+        float tipH = 24 + descLines.size() * lineH + 16;
+
+        float tipX = mx + 14;
+        float tipY = my + 14;
+
+        if (tipX + tipW > width / scale - 6) tipX = mx - tipW - 8;
+        if (tipY + tipH > height / scale - 6) tipY = height / scale - tipH - 6;
+        if (tipX < 6) tipX = 6;
+        if (tipY < 6) tipY = 6;
+
+        rounded(tipX, tipY, tipW, tipH, 6, 0xF215161A);
+        RenderUtil.drawRoundedRectOutline(tipX, tipY, tipW, tipH, 6, 1f, 0xFF3C3F4B, true, true, true, true);
+
+        text(FontManager.productSans16, name, tipX + 8, tipY + 6, accent);
+        float statW = textWidth(FontManager.productSans12, status);
+        text(FontManager.productSans12, status, tipX + tipW - 8 - statW, tipY + 7, statusColor);
+
+        rounded(tipX + 8, tipY + 20, tipW - 16, 1, 0, 0xFF33353D);
+
+        for (int i = 0; i < descLines.size(); i++) {
+            text(FontManager.productSans12, descLines.get(i), tipX + 8, tipY + 25 + i * lineH, 0xFFCCD0DC);
+        }
+
+        String bindText = hoveredModule.getKey() != 0 ? "Bind: " + KeyBindUtil.getKeyName(hoveredModule.getKey()) : "Unbound";
+        text(FontManager.productSans12, bindText, tipX + 8, tipY + tipH - 12, MUTED);
     }
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int button) throws IOException {
         if (closing) return;
         float mx = localX(mouseX), my = localY(mouseY);
-        if (!over(mx, my, windowX, windowY, WINDOW_W, WINDOW_H)) { searching = false; return; }
+        if (!over(mx, my, windowX, windowY, WINDOW_W, WINDOW_H)) { searching = false; typingConfig = false; return; }
+
         searching = button == 0 && over(mx, my, listX() + listWidth() - 164, windowY + 10, 164, 24);
         if (searching) { releaseEditors(); return; }
+
         for (int i = 0; i < CATEGORIES.length; i++) if (button == 0 && over(mx, my, windowX + 8, categoryY(i), SIDEBAR_W - 16, 30)) {
             category = CATEGORIES[i];
             searchText = "";
@@ -300,6 +528,48 @@ public class TenacityClickGui extends GuiScreen {
             select(modules.isEmpty() ? null : modules.get(0));
             return;
         }
+
+        if ("Configs".equalsIgnoreCase(category)) {
+            float cardY = windowY + 68;
+            float inputX = listX() + 14, inputY = cardY + 32;
+            if (over(mx, my, inputX, inputY, 160, 22)) {
+                typingConfig = true;
+                return;
+            } else {
+                typingConfig = false;
+            }
+            float saveBtnX = inputX + 160 + 10;
+            if (button == 0 && over(mx, my, saveBtnX, inputY, 70, 22)) {
+                Config cfg = new Config(newConfigName.trim().isEmpty() ? "default" : newConfigName.trim(), true);
+                cfg.save();
+                return;
+            }
+            float loadBtnX = saveBtnX + 70 + 8;
+            if (button == 0 && over(mx, my, loadBtnX, inputY, 70, 22)) {
+                Config cfg = new Config(newConfigName.trim().isEmpty() ? "default" : newConfigName.trim(), true);
+                cfg.load();
+                return;
+            }
+
+            File dir = new File(mc.mcDataDir, "myau/configs");
+            String[] files = dir.exists() ? dir.list((d, n) -> n.endsWith(".json")) : new String[0];
+            if (files == null || files.length == 0) files = new String[]{"default.json"};
+            float rowTop = cardY + 76 + 20;
+            float contentW = WINDOW_W - SIDEBAR_W - 30;
+            for (int i = 0; i < Math.min(5, files.length); i++) {
+                String filename = files[i];
+                String configName = filename.endsWith(".json") ? filename.substring(0, filename.length() - 5) : filename;
+                float rowY = rowTop + i * 34;
+                if (button == 0 && over(mx, my, listX(), rowY, contentW, 28)) {
+                    newConfigName = configName;
+                    Config cfg = new Config(configName, true);
+                    cfg.load();
+                    return;
+                }
+            }
+            return;
+        }
+
         if (over(mx, my, listX(), listTop(), listWidth(), listViewport())) {
             for (int i = 0; i < modules.size(); i++) if (over(mx, my, listX(), rowY(i), listWidth(), ROW_H)) {
                 Module module = modules.get(i);
@@ -309,6 +579,7 @@ public class TenacityClickGui extends GuiScreen {
                 return;
             }
         }
+
         if (over(mx, my, settingsX() + 5, settingsTop(), SETTINGS_W - 10, settingsViewport())) {
             float y = settingsTop() + 4 - settingsScroll;
             for (RiseValueEditor editor : editors) if (editor.isVisible()) {
@@ -318,6 +589,7 @@ public class TenacityClickGui extends GuiScreen {
             if (selected != null && button == 0 && over(mx, my, settingsX() + 10, y, SETTINGS_W - 20, 24)) binding = selected;
             return;
         }
+
         if (button == 0 && over(mx, my, windowX, windowY, SIDEBAR_W, 47)) {
             dragging = true;
             dragX = mx - windowX;
@@ -355,6 +627,12 @@ public class TenacityClickGui extends GuiScreen {
             select(modules.isEmpty() ? null : modules.get(0));
             return;
         }
+        if (typingConfig) {
+            if (keyCode == Keyboard.KEY_ESCAPE || keyCode == Keyboard.KEY_RETURN) { typingConfig = false; return; }
+            if (keyCode == Keyboard.KEY_BACK && !newConfigName.isEmpty()) newConfigName = newConfigName.substring(0, newConfigName.length() - 1);
+            else if (net.minecraft.util.ChatAllowedCharacters.isAllowedCharacter(typedChar) && newConfigName.length() < 32) newConfigName += typedChar;
+            return;
+        }
         if (binding != null) {
             if (keyCode != Keyboard.KEY_ESCAPE) binding.setKey(keyCode == Keyboard.KEY_DELETE || keyCode == Keyboard.KEY_BACK ? 0 : keyCode);
             binding = null;
@@ -368,7 +646,7 @@ public class TenacityClickGui extends GuiScreen {
     }
 
     private boolean isTyping() {
-        if (binding != null || searching) return true;
+        if (binding != null || searching || typingConfig) return true;
         for (RiseValueEditor editor : editors) if (editor.isTyping()) return true;
         return false;
     }
@@ -423,6 +701,7 @@ public class TenacityClickGui extends GuiScreen {
     }
     private static List<String> wrap(String description, float width) {
         List<String> lines = new ArrayList<>();
+        if (description == null || description.isEmpty()) return lines;
         String current = "";
         for (String word : description.split(" ")) {
             String next = current.isEmpty() ? word : current + " " + word;
